@@ -70,8 +70,10 @@ export interface RentmanProjectRequest {
   location_name?: string;
   usageperiod_start?: string | null;
   usageperiod_end?: string | null;
-  planperiod_start?: string;
-  planperiod_end?: string;
+  /** Required by Rentman POST /projectrequests (non-optional string). */
+  planperiod_start: string;
+  /** Required by Rentman POST /projectrequests (non-optional string). */
+  planperiod_end: string;
 }
 
 export interface MappedRequest {

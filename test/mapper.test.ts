@@ -4,6 +4,7 @@ import {
   buildRemark,
   mapSubmission,
   normalizeLanguage,
+  resolvePlanPeriods,
   toIsoDateTime,
 } from "../src/mapper.ts";
 import { normalizeSubmission } from "../src/payload.ts";
@@ -59,6 +60,7 @@ describe("mapSubmission", () => {
     expect(result.request?.usageperiod_start).toBe("2026-10-01T00:00:00Z");
     expect(result.request?.usageperiod_end).toBe("2026-10-03T23:59:59Z");
     expect(result.request?.planperiod_start).toBe("2026-10-01T00:00:00Z");
+    expect(result.request?.planperiod_end).toBe("2026-10-03T23:59:59Z");
     expect(result.request?.language).toBe("nl");
     expect(result.request?.remark).toContain("Brief:\nNeed PA + two techs");
     expect(result.request?.remark).toContain("Type:\nFestival");
@@ -114,6 +116,82 @@ describe("mapSubmission", () => {
     const result = mapSubmission(webhook({ langue: "Français" }), {}, now);
     expect(result.request?.language).toBe("fr");
   });
+
+  it("always sets planperiod when the form has no dates and omits usageperiod", () => {
+    const result = mapSubmission(
+      webhook({ email: "ada@example.com", message: "Need a quote" }),
+      {},
+      now,
+    );
+    expect(result.ignored).toBe(false);
+    expect(result.request?.planperiod_start).toBe("2026-09-22T00:00:00Z");
+    expect(result.request?.planperiod_end).toBe("2026-09-22T23:59:59Z");
+    expect(result.request).not.toHaveProperty("usageperiod_start");
+    expect(result.request).not.toHaveProperty("usageperiod_end");
+  });
+
+  it("derives the missing planperiod from a single start date", () => {
+    const result = mapSubmission(
+      webhook({ startdatum: "2026-10-01", email: "ada@example.com" }),
+      {},
+      now,
+    );
+    expect(result.request?.usageperiod_start).toBe("2026-10-01T00:00:00Z");
+    expect(result.request).not.toHaveProperty("usageperiod_end");
+    expect(result.request?.planperiod_start).toBe("2026-10-01T00:00:00Z");
+    expect(result.request?.planperiod_end).toBe("2026-10-01T23:59:59Z");
+  });
+
+  it("derives the missing planperiod from a single end date", () => {
+    const result = mapSubmission(
+      webhook({ einddatum: "2026-10-03", email: "ada@example.com" }),
+      {},
+      now,
+    );
+    expect(result.request).not.toHaveProperty("usageperiod_start");
+    expect(result.request?.usageperiod_end).toBe("2026-10-03T23:59:59Z");
+    expect(result.request?.planperiod_start).toBe("2026-10-03T00:00:00Z");
+    expect(result.request?.planperiod_end).toBe("2026-10-03T23:59:59Z");
+  });
+
+  it("maps dPro Webflow numbered labels to Rentman contact and brief fields", () => {
+    const result = mapSubmission(
+      webhook(
+        {
+          "First Name 4": "Ada",
+          "Last Name 4": "Lovelace",
+          "Email 6": "ada@example.com",
+          "Message 7": "Need PA and one tech",
+        },
+        "Contact Form",
+      ),
+      {},
+      now,
+    );
+    expect(result.request?.contact_person_first_name).toBe("Ada");
+    expect(result.request?.contact_person_lastname).toBe("Lovelace");
+    expect(result.request?.contact_person_email).toBe("ada@example.com");
+    expect(result.request?.remark).toContain("Brief:\nNeed PA and one tech");
+    expect(result.request?.planperiod_start).toBe("2026-09-22T00:00:00Z");
+    expect(result.request?.planperiod_end).toBe("2026-09-22T23:59:59Z");
+  });
+
+  it("maps hyphenated Webflow name attributes like first-name-4", () => {
+    const result = mapSubmission(
+      webhook({
+        "first-name-4": "Piet",
+        "last-name-4": "Jansen",
+        "email-6": "piet@acme.test",
+        "message-7": "Line array",
+      }),
+      {},
+      now,
+    );
+    expect(result.request?.contact_person_first_name).toBe("Piet");
+    expect(result.request?.contact_person_lastname).toBe("Jansen");
+    expect(result.request?.contact_person_email).toBe("piet@acme.test");
+    expect(result.request?.remark).toContain("Brief:\nLine array");
+  });
 });
 
 describe("helpers", () => {
@@ -127,6 +205,25 @@ describe("helpers", () => {
     expect(toIsoDateTime("2026-10-01", false)).toBe("2026-10-01T00:00:00Z");
     expect(toIsoDateTime("2026-10-01T18:30", true)).toBe("2026-10-01T18:30:00Z");
     expect(toIsoDateTime("not-a-date", false)).toBeUndefined();
+  });
+
+  it("resolves required plan periods with same-day UTC defaults", () => {
+    expect(resolvePlanPeriods(undefined, undefined, now)).toEqual({
+      planperiod_start: "2026-09-22T00:00:00Z",
+      planperiod_end: "2026-09-22T23:59:59Z",
+    });
+    expect(
+      resolvePlanPeriods("2026-10-01T18:30:00Z", undefined, now),
+    ).toEqual({
+      planperiod_start: "2026-10-01T18:30:00Z",
+      planperiod_end: "2026-10-01T23:59:59Z",
+    });
+    expect(
+      resolvePlanPeriods(undefined, "2026-10-03T18:30:00Z", now),
+    ).toEqual({
+      planperiod_start: "2026-10-03T00:00:00Z",
+      planperiod_end: "2026-10-03T18:30:00Z",
+    });
   });
 
   it("always includes a raw dump in the remark", () => {

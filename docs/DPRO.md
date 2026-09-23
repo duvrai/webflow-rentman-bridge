@@ -34,7 +34,11 @@ Use stable field names in the Designer (not only labels). These match the worker
 
 Add a hidden `website` input on the form. Leave it empty for real visitors.
 
-If the live field names differ, set `FIELD_*` or `FIELD_MAP_JSON` on the Worker (see the README). Do not hard-code dPro names into `src/`.
+The live [contact form](https://www.dpro.be/contact) currently has no date inputs. The worker still sends required Rentman `planperiod_start` / `planperiod_end` as today `00:00:00Z`–`23:59:59Z` UTC and leaves `usageperiod_*` unset.
+
+Live Webflow `data-name` values are leftover template labels (`First Name 4`, `Last Name 4`, `Email 6`, `Message 7`; also `name="first-name-4"` etc.). The default aliases and numbered-label matching cover those keys. On the published form, `Last Name 4` is the **Locatie** input and `First Name 4` is used for both **Naam** and **Telefoon** — until those Designer names are fixed, the venue may land in `contact_person_lastname`. Prefer renaming fields in the Designer to stable names from the table above when you next edit the form.
+
+If other live field names differ, set `FIELD_*` or `FIELD_MAP_JSON` on the Worker (see the README). Keep tokens out of this file.
 
 ## Language
 

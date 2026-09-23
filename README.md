@@ -8,7 +8,7 @@ Built for AV / event rental companies that already use Webflow for the public si
 
 - Accepts Webflow `form_submission` webhooks, Data API–style submission JSON, flat JSON, or `application/x-www-form-urlencoded` form POSTs.
 - Maps configurable field names to a Rentman project request:
-  `name`, `contact_name`, `contact_person_first_name`, `contact_person_lastname`, `contact_person_email`, `contact_phone`, `location_name`, `usageperiod_start` / `usageperiod_end` (ISO), `language` (`nl` / `fr` / `en`).
+  `name`, `contact_name`, `contact_person_first_name`, `contact_person_lastname`, `contact_person_email`, `contact_phone`, `location_name`, `usageperiod_start` / `usageperiod_end` (ISO, only when the form sent dates), `planperiod_start` / `planperiod_end` (always sent), `language` (`nl` / `fr` / `en`).
 - Builds `remark` from brief + type + materiaal/crew, then appends a raw field dump.
 - Always sends `linked_contact: null` so Rentman staff match the contact when converting the request.
 - Drops spam: if the honeypot field is filled, the worker returns **200** and does nothing.
@@ -39,7 +39,7 @@ Webflow form
 
 Rentman create fields used (from the official `projectrequests` resource):
 
-`name`, `contact_name`, `contact_person_first_name`, `contact_person_lastname`, `contact_person_email`, `contact_phone`, `location_name`, `usageperiod_start`, `usageperiod_end`, `planperiod_start`, `planperiod_end` (copied from usage dates when present), `language`, `remark`, `linked_contact` (always `null`).
+`name`, `contact_name`, `contact_person_first_name`, `contact_person_lastname`, `contact_person_email`, `contact_phone`, `location_name`, `usageperiod_start`, `usageperiod_end` (only when the form sent dates), `planperiod_start`, `planperiod_end` (always required by Rentman — see below), `language`, `remark`, `linked_contact` (always `null`).
 
 Other Rentman fields (`price`, mailing address, `is_paid`, …) are left unset.
 
@@ -110,20 +110,21 @@ project=Gala&email=ada%40example.com&website=
 
 ## Field mapping
 
-Aliases are case-insensitive. Spaces, hyphens, and accents collapse (`Prénom` → `prenom`, `E-mail` → `e_mail`).
+Aliases are case-insensitive. Spaces, hyphens, and accents collapse (`Prénom` → `prenom`, `E-mail` → `e_mail`). A trailing number on a Webflow label also matches (`First Name 4` → `first_name`, `Email 6` → `email`).
 
 | Rentman / remark slot | Default Webflow names (first match wins) |
 | --- | --- |
 | `name` (project title) | `project`, `event`, `project_name`, `evenement`, `name`, … |
 | `contact_name` | `company`, `bedrijf`, `organisation`, … |
-| `contact_person_first_name` | `first_name`, `voornaam`, `prenom`, … |
-| `contact_person_lastname` | `last_name`, `achternaam`, `nom`, … |
+| `contact_person_first_name` | `first_name`, `voornaam`, `prenom`, `First Name 4`, … |
+| `contact_person_lastname` | `last_name`, `achternaam`, `nom`, `Last Name 4`, … |
 | `contact_phone` | `phone`, `telefoon`, `tel`, `gsm`, … |
-| `contact_person_email` | `email`, `e-mail`, … |
+| `contact_person_email` | `email`, `e-mail`, `Email 6`, … |
 | `location_name` | `location`, `locatie`, `lieu`, … |
-| `usageperiod_start` / `_end` | `start` / `end`, `startdatum` / `einddatum`, `from` / `to`, … Date-only values become `T00:00:00Z` / `T23:59:59Z`. |
+| `usageperiod_start` / `_end` | `start` / `end`, `startdatum` / `einddatum`, `from` / `to`, … Date-only values become `T00:00:00Z` / `T23:59:59Z`. Omitted when the form has no dates. |
+| `planperiod_start` / `_end` | Always sent. Copied from usage dates when present; a single date is paired with the start or end of that UTC day; otherwise today `00:00:00Z`–`23:59:59Z` UTC. |
 | `language` | `language`, `taal`, `langue` → `nl`, `fr`, or `en` |
-| remark **Brief** | `message`, `brief`, `opmerkingen`, … |
+| remark **Brief** | `message`, `brief`, `message 7`, `opmerkingen`, … |
 | remark **Type** | `type`, `soort`, `event_type` |
 | remark **Materiaal/crew** | `materiaal`, `crew`, `equipment` |
 
