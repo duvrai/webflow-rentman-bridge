@@ -1,0 +1,31 @@
+{
+  "name": "webflow-rentman-bridge",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker that turns Webflow form submissions into Rentman project requests.",
+  "license": "MIT",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --ip 127.0.0.1 --port 4545",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "webflow",
+    "rentman",
+    "cloudflare-workers",
+    "webhook",
+    "av-rental"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260921.1",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.36.0"
+  }
+}

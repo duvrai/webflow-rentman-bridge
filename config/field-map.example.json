@@ -1,0 +1,15 @@
+{
+  "name": ["project", "evenement", "event_name"],
+  "contact_name": ["company", "bedrijf", "organisation"],
+  "contact_person_first_name": ["first_name", "voornaam", "prenom"],
+  "contact_person_lastname": ["last_name", "achternaam", "nom"],
+  "contact_person_email": ["email", "e-mail"],
+  "contact_phone": ["phone", "telefoon", "tel"],
+  "location_name": ["location", "locatie", "lieu"],
+  "usageperiod_start": ["start", "startdatum", "from"],
+  "usageperiod_end": ["end", "einddatum", "to"],
+  "language": ["language", "taal", "langue"],
+  "brief": ["message", "brief", "opmerkingen"],
+  "type": ["type", "soort", "event_type"],
+  "material": ["materiaal", "crew", "equipment"]
+}

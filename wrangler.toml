@@ -1,0 +1,34 @@
+name = "webflow-rentman-bridge"
+main = "src/index.ts"
+compatibility_date = "2026-09-22"
+
+# Non-secret config only. Put RENTMAN_API_TOKEN and WEBHOOK_SECRET in
+# `.dev.vars` locally, or `wrangler secret put` in production.
+[vars]
+DEFAULT_LANGUAGE = "nl"
+HONEYPOT_FIELD = "website"
+DEFAULT_PROJECT_NAME = "Website request"
+RENTMAN_API_BASE = "https://api.rentman.net"
+
+# Optional: ignore submissions from other Webflow forms (comma-separated names).
+# ALLOWED_FORM_NAMES = "Contact,Offerte"
+
+# Optional: override default field aliases. Keys are Rentman / remark slots;
+# values are Webflow field names (string or array). See README.
+# FIELD_MAP_JSON = "{\"name\":[\"project\",\"evenement\"],\"contact_person_email\":[\"E-mail\"]}"
+
+# Optional per-field alias lists (comma-separated). These replace the default
+# aliases for that slot when set.
+# FIELD_NAME = "project,evenement,event_name"
+# FIELD_CONTACT_NAME = "company,bedrijf,organisation"
+# FIELD_CONTACT_PERSON_FIRST_NAME = "first_name,voornaam,prenom"
+# FIELD_CONTACT_PERSON_LASTNAME = "last_name,achternaam,nom"
+# FIELD_CONTACT_PERSON_EMAIL = "email,e-mail"
+# FIELD_CONTACT_PHONE = "phone,telefoon,tel"
+# FIELD_LOCATION_NAME = "location,locatie,lieu"
+# FIELD_USAGEPERIOD_START = "start,startdatum,from"
+# FIELD_USAGEPERIOD_END = "end,einddatum,to"
+# FIELD_LANGUAGE = "language,taal,langue"
+# FIELD_BRIEF = "message,brief,opmerkingen"
+# FIELD_TYPE = "type,soort,event_type"
+# FIELD_MATERIAL = "materiaal,crew,equipment"
