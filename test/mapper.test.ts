@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { resolveFieldMap } from "../src/config.ts";
 import {
   buildRemark,
+  formNameAllowed,
   mapSubmission,
   normalizeLanguage,
   resolvePlanPeriods,
   toIsoDateTime,
 } from "../src/mapper.ts";
+import { liveFormSubmissionWebhook } from "./fixtures/webflow-contact-form.ts";
 import { normalizeSubmission } from "../src/payload.ts";
 import type { Env, NormalizedSubmission } from "../src/types.ts";
 
@@ -191,9 +193,60 @@ describe("mapSubmission", () => {
     expect(result.request?.planperiod_start).toBe("2026-09-22T00:00:00Z");
     expect(result.request?.planperiod_end).toBe("2026-09-22T23:59:59Z");
   });
+
+  it("maps the live Contact Form payload with an empty First Name 4", () => {
+    const result = mapSubmission(
+      normalizeSubmission(liveFormSubmissionWebhook),
+      {},
+      now,
+    );
+    expect(result.ignored).toBe(false);
+    expect(result.request?.contact_person_first_name).toBeUndefined();
+    expect(result.request?.contact_person_lastname).toBe("nog");
+    expect(result.request?.contact_person_email).toBe("contact@example.com");
+    expect(result.request?.remark).toContain("Brief:\nnognog");
+    expect(result.request?.name).toBe("nog — Contact Form");
+    expect(result.request?.planperiod_start).toBe("2026-09-22T00:00:00Z");
+    expect(result.request?.planperiod_end).toBe("2026-09-22T23:59:59Z");
+    expect(result.request).not.toHaveProperty("usageperiod_start");
+  });
+
+  it("does not ignore Contact Form when allow-listed as Contact", () => {
+    const result = mapSubmission(
+      normalizeSubmission(liveFormSubmissionWebhook),
+      { ALLOWED_FORM_NAMES: "Contact,Offerte" },
+      now,
+    );
+    expect(result.ignored).toBe(false);
+    expect(result.request?.contact_person_email).toBe("contact@example.com");
+  });
+
+  it("does not treat Designer website metadata as a honeypot", () => {
+    const result = mapSubmission(
+      normalizeSubmission({
+        name: "Contact Form",
+        website: "https://www.dpro.be",
+        page: "https://www.dpro.be/contact",
+        "Email 6": "ada@example.com",
+        "Last Name 4": "Lovelace",
+      }),
+      { HONEYPOT_FIELD: "website" },
+      now,
+    );
+    expect(result.ignored).toBe(false);
+    expect(result.request?.contact_person_email).toBe("ada@example.com");
+  });
 });
 
 describe("helpers", () => {
+  it("matches Contact to Contact Form allow-list names", () => {
+    expect(formNameAllowed("Contact Form", ["Contact", "Offerte"])).toBe(true);
+    expect(formNameAllowed("Contact Form 2", ["Contact"])).toBe(true);
+    expect(formNameAllowed("Newsletter", ["Contact"])).toBe(false);
+    expect(formNameAllowed(null, ["Contact"])).toBe(false);
+    expect(formNameAllowed("Contact", [])).toBe(true);
+  });
+
   it("normalizes language aliases", () => {
     expect(normalizeLanguage("FR-BE", "nl")).toBe("fr");
     expect(normalizeLanguage("", "nl")).toBe("nl");

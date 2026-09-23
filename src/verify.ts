@@ -1,8 +1,28 @@
 const MAX_SKEW_MS = 5 * 60 * 1000;
 
+export type AuthMode = "none" | "webflow_hmac" | "shared_secret";
+
+export type AuthFailReason =
+  | "missing_secret"
+  | "secret_mismatch"
+  | "invalid_signature"
+  | "stale_timestamp";
+
 export type AuthResult =
-  | { ok: true; mode: "none" | "webflow_hmac" | "shared_secret" }
-  | { ok: false; status: 401; error: string; message: string };
+  | {
+      ok: true;
+      mode: AuthMode;
+      hmacAttempted: boolean;
+      hmacFailedReason?: AuthFailReason;
+    }
+  | {
+      ok: false;
+      status: 401;
+      error: "unauthorized" | "invalid_signature";
+      message: string;
+      reason: AuthFailReason;
+      hmacAttempted: boolean;
+    };
 
 export async function authorizeRequest(
   request: Request,
@@ -10,37 +30,67 @@ export async function authorizeRequest(
   secret: string | undefined,
   now = () => Date.now(),
 ): Promise<AuthResult> {
-  if (!secret) {
-    return { ok: true, mode: "none" };
+  const expected = secret?.trim() ?? "";
+  if (!expected) {
+    return { ok: true, mode: "none", hmacAttempted: false };
   }
 
   const signature = header(request, "x-webflow-signature");
   const timestamp = header(request, "x-webflow-timestamp");
+  let hmacAttempted = false;
+  let hmacFailedReason: AuthFailReason | undefined;
 
   if (signature && timestamp) {
-    const valid = await verifyWebflowSignature(secret, timestamp, rawBody, signature, now);
-    if (!valid) {
+    hmacAttempted = true;
+    const hmac = await verifyWebflowSignatureDetailed(
+      expected,
+      timestamp,
+      rawBody,
+      signature,
+      now,
+    );
+    if (hmac.ok) {
+      return { ok: true, mode: "webflow_hmac", hmacAttempted: true };
+    }
+    hmacFailedReason = hmac.reason;
+  }
+
+  const provided = sharedSecretFromRequest(request);
+  if (provided && timingSafeEqualString(provided, expected)) {
+    return {
+      ok: true,
+      mode: "shared_secret",
+      hmacAttempted,
+      hmacFailedReason,
+    };
+  }
+
+  if (hmacAttempted && hmacFailedReason) {
+    const usedQueryOrHeader = Boolean(provided);
+    if (!usedQueryOrHeader) {
       return {
         ok: false,
         status: 401,
         error: "invalid_signature",
-        message: "Webflow webhook signature or timestamp is invalid.",
+        message:
+          hmacFailedReason === "stale_timestamp"
+            ? "Webflow webhook timestamp is outside the 5-minute window."
+            : "Webflow webhook signature is invalid.",
+        reason: hmacFailedReason,
+        hmacAttempted: true,
       };
     }
-    return { ok: true, mode: "webflow_hmac" };
   }
 
-  const provided = sharedSecretFromRequest(request);
-  if (!provided || !timingSafeEqualString(provided, secret)) {
-    return {
-      ok: false,
-      status: 401,
-      error: "unauthorized",
-      message:
-        "Missing or invalid shared secret. Send X-Webhook-Secret, Authorization: Bearer, or ?secret=.",
-    };
-  }
-  return { ok: true, mode: "shared_secret" };
+  return {
+    ok: false,
+    status: 401,
+    error: "unauthorized",
+    message:
+      "Missing or invalid shared secret. Send X-Webhook-Secret, Authorization: Bearer, or ?secret=.",
+    reason: provided ? "secret_mismatch" : "missing_secret",
+    hmacAttempted,
+  };
 }
 
 export function sharedSecretFromRequest(request: Request): string | null {
@@ -54,8 +104,19 @@ export function sharedSecretFromRequest(request: Request): string | null {
     return authorization.trim();
   }
 
-  const url = new URL(request.url);
-  return url.searchParams.get("secret") ?? url.searchParams.get("token");
+  return querySecret(new URL(request.url));
+}
+
+/** Prefer the literal `secret=` query param; accept case variants and `token=`. */
+export function querySecret(url: URL): string | null {
+  const exact = url.searchParams.get("secret");
+  if (exact != null) return exact;
+
+  for (const [key, value] of url.searchParams.entries()) {
+    if (key.toLowerCase() === "secret") return value;
+  }
+
+  return url.searchParams.get("token");
 }
 
 export async function verifyWebflowSignature(
@@ -65,12 +126,44 @@ export async function verifyWebflowSignature(
   providedSignature: string,
   now = () => Date.now(),
 ): Promise<boolean> {
-  const requestTimestamp = Number(timestamp);
-  if (!Number.isFinite(requestTimestamp)) return false;
-  if (Math.abs(now() - requestTimestamp) > MAX_SKEW_MS) return false;
+  const result = await verifyWebflowSignatureDetailed(
+    secret,
+    timestamp,
+    rawBody,
+    providedSignature,
+    now,
+  );
+  return result.ok;
+}
 
+export async function verifyWebflowSignatureDetailed(
+  secret: string,
+  timestamp: string,
+  rawBody: string,
+  providedSignature: string,
+  now = () => Date.now(),
+): Promise<{ ok: true } | { ok: false; reason: AuthFailReason }> {
+  const requestTimestamp = parseWebhookTimestamp(timestamp);
+  if (requestTimestamp == null) {
+    return { ok: false, reason: "invalid_signature" };
+  }
+  if (Math.abs(now() - requestTimestamp) > MAX_SKEW_MS) {
+    return { ok: false, reason: "stale_timestamp" };
+  }
+
+  // Webflow signs `${timestamp}:${rawBody}` using the header value as-is.
   const expected = await hmacSha256Hex(secret, `${timestamp}:${rawBody}`);
-  return timingSafeEqualString(expected, providedSignature.trim().toLowerCase());
+  if (!timingSafeEqualString(expected, providedSignature.trim().toLowerCase())) {
+    return { ok: false, reason: "invalid_signature" };
+  }
+  return { ok: true };
+}
+
+/** Webflow documents milliseconds; some senders emit Unix seconds. */
+export function parseWebhookTimestamp(timestamp: string): number | null {
+  const raw = Number(timestamp);
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  return raw < 1e12 ? raw * 1000 : raw;
 }
 
 export async function hmacSha256Hex(secret: string, message: string): Promise<string> {
