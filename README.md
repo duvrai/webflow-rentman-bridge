@@ -26,6 +26,35 @@ These are product limits, not missing todos:
 | Auto-emails to customers | No mailer. Webflow can still send its own form notification to your inbox. |
 | Live stock or pricing | The worker does not read equipment, availability, or rates. |
 
+## Webhook URL (required shape)
+
+The live Worker is:
+
+`https://webflow-rentman-bridge.duvrai.workers.dev`
+
+Webflow must POST to one of these (query param name is literally **`secret=`**, lowercase):
+
+```
+https://webflow-rentman-bridge.duvrai.workers.dev/webhook?secret=<WEBHOOK_SECRET>
+https://webflow-rentman-bridge.duvrai.workers.dev/?secret=<WEBHOOK_SECRET>
+```
+
+- Paths **`/`** and **`/webhook`** are the only accepted POST routes. Other paths → **404**.
+- `WEBHOOK_SECRET` is the Cloudflare Worker secret (`wrangler secret put WEBHOOK_SECRET`). Never commit it. Paste the same value after `secret=` in the Webflow UI.
+- Header alternatives still work: `X-Webhook-Secret` or `Authorization: Bearer <WEBHOOK_SECRET>`.
+- A Webflow **form notification email** is independent of this webhook. Mail success does not mean the Worker ran.
+
+### Live form vs controlled probe
+
+Use this when “I got the Webflow email, but Rentman has no new project request”:
+
+1. **Health:** `GET https://webflow-rentman-bridge.duvrai.workers.dev/` → `ok: true`, `webhookSecretConfigured: true`, `rentmanConfigured: true`, `dryRun: false`.
+2. **Probe (known-good):** `POST` the documented `form_submission` JSON to `/webhook?secret=<WEBHOOK_SECRET>`. A 201 with `rentmanId` means Cloudflare + Rentman work. A 401 means the secret in the URL does not match the Worker secret.
+3. **Webflow URL:** Site settings → Apps & integrations → Webhooks (or the form’s webhook URL). Host must be `webflow-rentman-bridge.duvrai.workers.dev`, path `/` or `/webhook`, query param **`secret=`** (not `token=`, not `Secret=`). Publish the site after changing the URL.
+4. **Mail ≠ webhook:** Webflow email notifications are additive. They fire even when no webhook is registered, the URL is wrong, or the Worker returns 401.
+5. **Cloudflare logs:** each POST logs one JSON line `webhook_post` (`path`, `authOk`, `authReason` = `missing_secret` / `secret_mismatch` / `invalid_signature` / `stale_timestamp`, never the secret), then `payload_parsed` (field **keys** only), then `rentman_created` or `rentman_error` / `ignored`.
+6. **Statuses:** 401 = auth; 400 = body; 200 + `ignored` = honeypot or form allow-list; 502 = Rentman rejected the create. Webflow retries only non-2xx.
+
 ## How it works
 
 ```
@@ -73,6 +102,15 @@ Site webhook or API-created webhook with `triggerType: form_submission`:
 ```
 
 A payload-only body (`{ "name": "Contact", "data": { ... }, "formId": "..." }`) is accepted too.
+
+Also accepted:
+
+- `payload.formData` (or `fields` / `{ name, value }[]`) when `data` is missing
+- Designer **Form webhook URL** bodies: `{ "name", "site", "page", "data": { ... } }` or the same fields flattened at the top level
+- `application/x-www-form-urlencoded` and `multipart/form-data` field posts (HTML `name` attributes such as `email-6`)
+- JSON bodies with a missing `Content-Type` that are actually urlencoded
+
+Envelope keys (`page`, `site`, `website` on Designer webhooks) are not treated as form fields, so a site URL in `website` does not trip the honeypot.
 
 ### 2. Webflow Data API `form_submission`
 
@@ -171,12 +209,14 @@ Put secrets in `.dev.vars` locally (`cp .env.example .dev.vars`) or `wrangler se
 When it **is** set:
 
 1. **Webflow HMAC** — if the request has `x-webflow-signature` and `x-webflow-timestamp`, the worker checks `HMAC-SHA256(secret, timestamp + ":" + rawBody)` and rejects timestamps older than 5 minutes. This is what [Webflow documents](https://developers.webflow.com/data/docs/working-with-webhooks) for API-created webhooks (webhook-specific secret after 2025-04-14) and OAuth apps (OAuth client secret).
-2. **Shared secret** — dashboard webhooks and HTML form POSTs have **no** signature headers. Send the same value as:
+2. **Shared secret fallback** — if those HMAC headers are missing **or HMAC fails** (wrong signing key, stale timestamp), the worker still accepts the same `WEBHOOK_SECRET` via:
    - `X-Webhook-Secret: <secret>`, or
    - `Authorization: Bearer <secret>`, or
    - `https://<worker>/webhook?secret=<secret>` (visible in the Webflow UI; acceptable if the secret is not the Rentman token).
 
-Wrong or missing credentials → **401**.
+This matters for the live path: API-created webhooks always send HMAC headers, but `WEBHOOK_SECRET` is often the query value pasted in Webflow, not Webflow’s `whsec_…` signing key. Without the fallback, a valid `?secret=` would still 401.
+
+Wrong or missing credentials → **401** (`unauthorized` when the shared secret is missing/wrong; `invalid_signature` when HMAC fails and no shared secret was sent).
 
 ## Errors
 
@@ -184,7 +224,7 @@ Wrong or missing credentials → **401**.
 | --- | --- |
 | 200 | Health, ignored honeypot / other form, or `DRY_RUN` |
 | 201 | Rentman created the project request |
-| 400 | Empty / invalid body, unsupported multipart |
+| 400 | Empty / invalid body, unreadable multipart |
 | 401 | Bad signature or shared secret |
 | 404 | POST to an unknown path |
 | 405 | Not GET/POST/OPTIONS |
@@ -227,8 +267,11 @@ Dashboard-created webhooks **do not** send signature headers. Use option B or re
 ### Option B — Dashboard webhook + query secret
 
 1. Webflow → Site settings → Apps & integrations → Webhooks.
-2. Event: form submission. URL: `https://<your-worker>.workers.dev/webhook?secret=<WEBHOOK_SECRET>`.
-3. Set the same value with `wrangler secret put WEBHOOK_SECRET`.
+2. Event: form submission. URL (literal query name `secret=`):
+
+   `https://webflow-rentman-bridge.duvrai.workers.dev/webhook?secret=<WEBHOOK_SECRET>`
+
+3. Set the same value with `wrangler secret put WEBHOOK_SECRET`. Publish the site after saving the webhook.
 
 ### Option C — Form action POST
 

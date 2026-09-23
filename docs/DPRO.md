@@ -46,9 +46,27 @@ If the live field names differ, set `FIELD_*` or `FIELD_MAP_JSON` on the Worker 
 
 1. Create a Cloudflare Worker from this repo. Store `RENTMAN_API_TOKEN` with `wrangler secret put`.
 2. Store `WEBHOOK_SECRET` the same way.
-3. Preferred: create a site webhook via the Webflow Data API (`form_submission` → `https://<worker>/webhook`) and keep the webhook secret as `WEBHOOK_SECRET`.
-4. Dashboard-only webhooks are unsigned. Use `https://<worker>/webhook?secret=<WEBHOOK_SECRET>` instead.
-5. Optionally set `ALLOWED_FORM_NAMES=Offerte,Contact` so newsletter or other forms are ignored.
+3. Preferred: create a site webhook via the Webflow Data API (`form_submission` → `https://webflow-rentman-bridge.duvrai.workers.dev/webhook`) and keep the webhook secret as `WEBHOOK_SECRET`.
+4. Dashboard-only webhooks are unsigned. Use this exact URL (query param name is `secret=`):
+
+   `https://webflow-rentman-bridge.duvrai.workers.dev/webhook?secret=<WEBHOOK_SECRET>`
+
+5. Optionally set `ALLOWED_FORM_NAMES=Contact,Offerte`. The live form `data-name` is **Contact Form**; the worker treats `Contact` and `Contact Form` as the same allow-list name.
+6. The published contact form (`www.dpro.be/contact`) has **no** custom `action` — it posts to Webflow, which emails `thomas@dpro.be` and (only if configured) fires the site webhook. Mail without a new Rentman row means the webhook URL/secret is wrong or the Worker never received the POST. See the README live-vs-probe checklist.
+
+## Live Designer field names (2026-09-23)
+
+The notification email uses Designer `data-name` values, not the visible NL labels:
+
+| Visible label | `data-name` / webhook key | HTML `name` |
+| --- | --- | --- |
+| Naam | `First Name 4` | `first-name-4` |
+| Telefoon (optioneel) | `First Name 4` (duplicate) | `first-name-4` (duplicate) |
+| Locatie | `Last Name 4` | `last-name-4` |
+| E-mail | `Email 6` | `email-6` |
+| Bericht | `Message 7` | `message-7` |
+
+Two inputs share `First Name 4`, so an empty optional phone can overwrite the name in Webflow’s payload (empty first name is tolerated). `Last Name 4` is actually location. Rename fields in the Designer when convenient; the worker already maps these numbered labels.
 
 ## Rentman
 

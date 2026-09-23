@@ -41,14 +41,8 @@ export function mapSubmission(
   }
 
   const allowed = parseCsv(env.ALLOWED_FORM_NAMES);
-  if (allowed.length > 0) {
-    const formName = submission.formName ?? "";
-    const match = allowed.some(
-      (name) => normalizeLookupKey(name) === normalizeLookupKey(formName),
-    );
-    if (!match) {
-      return { ignored: true, reason: "form_not_allowed" };
-    }
+  if (allowed.length > 0 && !formNameAllowed(submission.formName, allowed)) {
+    return { ignored: true, reason: "form_not_allowed" };
   }
 
   const picked = pickFields(lookup, fieldMap);
@@ -119,6 +113,26 @@ export function buildLookup(fields: Record<string, string>): Map<string, string>
   }
 
   return lookup;
+}
+
+/** "Contact" matches Webflow `data-name` "Contact Form" / "Contact Form 2". */
+export function formNameAllowed(
+  formName: string | null | undefined,
+  allowed: string[],
+): boolean {
+  if (allowed.length === 0) return true;
+  const actual = normalizeLookupKey(formName ?? "");
+  const actualBase = stripFormNameSuffix(actual);
+  return allowed.some((name) => {
+    const normalized = normalizeLookupKey(name);
+    if (!normalized) return false;
+    if (normalized === actual) return true;
+    return stripFormNameSuffix(normalized) === actualBase;
+  });
+}
+
+function stripFormNameSuffix(key: string): string {
+  return key.replace(/_form(_\d+)?$/, "").replace(/_\d+$/, "");
 }
 
 export function readField(lookup: Map<string, string>, aliases: string[]): string {

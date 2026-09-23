@@ -2,19 +2,54 @@ import type { NormalizedSubmission, SubmissionSource } from "./types.ts";
 
 const META_KEYS = new Set([
   "triggertype",
+  "trigger",
   "payload",
   "formresponse",
+  "formdata",
+  "form_data",
+  "formfields",
+  "form_fields",
   "schema",
   "displayname",
   "siteid",
+  "site_id",
+  "site",
   "workspaceid",
+  "workspace_id",
   "datesubmitted",
   "submittedat",
   "formid",
+  "form_id",
   "formelementid",
+  "form_element_id",
   "localeid",
+  "locale_id",
   "id",
+  "page",
+  "path",
+  "domain",
+  "hostname",
+  "referrer",
+  "url",
+  "webhook",
+  "event",
+  "d",
+  "formname",
+  "form_name",
+  "secret",
+  "token",
 ]);
+
+const FIELD_CONTAINER_KEYS = [
+  "data",
+  "formData",
+  "form_data",
+  "formResponse",
+  "form_response",
+  "fields",
+  "formFields",
+  "form_fields",
+] as const;
 
 export function stringifyFieldValue(value: unknown): string {
   if (value == null) return "";
@@ -25,6 +60,16 @@ export function stringifyFieldValue(value: unknown): string {
       .map((item) => stringifyFieldValue(item))
       .filter(Boolean)
       .join(", ");
+  }
+  if (typeof value === "object") {
+    const rec = value as Record<string, unknown>;
+    if (rec.value != null && typeof rec.value !== "object") {
+      return stringifyFieldValue(rec.value);
+    }
+    if (typeof rec.text === "string") return rec.text;
+    if (rec.data != null && typeof rec.data !== "object") {
+      return stringifyFieldValue(rec.data);
+    }
   }
   try {
     return JSON.stringify(value);
@@ -42,6 +87,29 @@ export function fieldsFromRecord(data: unknown): Record<string, string> {
   return fields;
 }
 
+/** Object of fields, or Webflow/Logic-style `[{ name, value }]`. */
+export function extractFields(data: unknown): Record<string, string> {
+  const unwrapped = unwrapJson(data);
+  if (Array.isArray(unwrapped)) {
+    const fields: Record<string, string> = {};
+    for (const item of unwrapped) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const rec = item as Record<string, unknown>;
+      const key =
+        asString(rec.name) ??
+        asString(rec.label) ??
+        asString(rec.fieldName) ??
+        asString(rec.field_name) ??
+        asString(rec.key);
+      if (!key) continue;
+      const value = rec.value ?? rec.text ?? rec.data ?? rec.fieldValue;
+      fields[key] = stringifyFieldValue(value);
+    }
+    return fields;
+  }
+  return fieldsFromRecord(unwrapped);
+}
+
 export function parseUrlEncoded(body: string): Record<string, string> {
   const fields: Record<string, string> = {};
   const params = new URLSearchParams(body);
@@ -55,47 +123,77 @@ export function parseUrlEncoded(body: string): Record<string, string> {
   return fields;
 }
 
+export function looksLikeUrlEncoded(body: string): boolean {
+  const trimmed = body.trim();
+  if (!trimmed || trimmed.startsWith("{") || trimmed.startsWith("[")) return false;
+  if (!trimmed.includes("=")) return false;
+  const params = new URLSearchParams(trimmed);
+  return [...params.keys()].length > 0;
+}
+
 export function normalizeSubmission(
   raw: unknown,
   sourceHint?: SubmissionSource,
 ): NormalizedSubmission {
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    const root = raw as Record<string, unknown>;
+  const root = unwrapJson(raw);
 
-    if (isWebflowWebhook(root)) {
-      const payload = (root.payload ?? {}) as Record<string, unknown>;
+  if (root && typeof root === "object" && !Array.isArray(root)) {
+    const record = root as Record<string, unknown>;
+    const payload = unwrapObject(record.payload);
+
+    if (isWebflowWebhook(record, payload)) {
+      const inner = payload ?? record;
+      const fields = fieldsFromEnvelope(inner);
       return {
         source: "webflow_webhook",
-        formName: asString(payload.name),
-        submittedAt: asString(payload.submittedAt),
-        siteId: asString(payload.siteId),
-        localeId: asString(payload.localeId),
-        submissionId: asString(payload.id) ?? asString(payload.formId),
-        fields: fieldsFromRecord(payload.data),
+        formName: formNameFrom(inner) ?? formNameFrom(record),
+        submittedAt:
+          asString(inner.submittedAt) ??
+          asString(inner.submitted_at) ??
+          asString(inner.dateSubmitted),
+        siteId: siteIdFrom(inner) ?? siteIdFrom(record),
+        localeId: asString(inner.localeId) ?? asString(inner.locale_id),
+        submissionId:
+          asString(inner.id) ??
+          asString(inner.formId) ??
+          asString(inner.form_id),
+        fields,
       };
     }
 
-    if (isWebflowDataApi(root)) {
+    if (isWebflowDataApi(record)) {
       return {
         source: "webflow_data_api",
-        formName: asString(root.displayName) ?? asString(root.name),
-        submittedAt: asString(root.dateSubmitted) ?? asString(root.submittedAt),
-        siteId: asString(root.siteId),
-        localeId: asString(root.localeId),
-        submissionId: asString(root.id),
-        fields: fieldsFromRecord(root.formResponse),
+        formName: asString(record.displayName) ?? asString(record.name),
+        submittedAt: asString(record.dateSubmitted) ?? asString(record.submittedAt),
+        siteId: siteIdFrom(record),
+        localeId: asString(record.localeId),
+        submissionId: asString(record.id),
+        fields: extractFields(record.formResponse),
       };
     }
 
-    if (looksLikeWebhookPayload(root)) {
+    if (looksLikeWebhookPayload(record)) {
       return {
         source: "webflow_webhook",
-        formName: asString(root.name),
-        submittedAt: asString(root.submittedAt),
-        siteId: asString(root.siteId),
-        localeId: asString(root.localeId),
-        submissionId: asString(root.id) ?? asString(root.formId),
-        fields: fieldsFromRecord(root.data),
+        formName: formNameFrom(record),
+        submittedAt: asString(record.submittedAt) ?? asString(record.submitted_at),
+        siteId: siteIdFrom(record),
+        localeId: asString(record.localeId),
+        submissionId: asString(record.id) ?? asString(record.formId),
+        fields: fieldsFromEnvelope(record),
+      };
+    }
+
+    if (looksLikeDesignerFlat(record)) {
+      return {
+        source: "webflow_webhook",
+        formName: formNameFrom(record),
+        submittedAt: asString(record.submittedAt) ?? asString(record.submitted_at),
+        siteId: siteIdFrom(record),
+        localeId: asString(record.localeId),
+        submissionId: asString(record.id) ?? asString(record.formId),
+        fields: stripEnvelopeMeta(stripMetaFields(fieldsFromRecord(record))),
       };
     }
   }
@@ -107,8 +205,28 @@ export function normalizeSubmission(
     siteId: null,
     localeId: null,
     submissionId: null,
-    fields: fieldsFromRecord(raw),
+    fields: fieldsFromRecord(root),
   };
+}
+
+export function fieldsFromEnvelope(obj: Record<string, unknown>): Record<string, string> {
+  for (const key of FIELD_CONTAINER_KEYS) {
+    if (obj[key] == null) continue;
+    const fields = extractFields(obj[key]);
+    if (Object.keys(fields).length > 0) return fields;
+  }
+
+  const nestedForm = unwrapObject(obj.form);
+  if (nestedForm) {
+    const nested = fieldsFromEnvelope(nestedForm);
+    if (Object.keys(nested).length > 0) return nested;
+    const named = formNameFrom(nestedForm);
+    if (named && Object.keys(nestedForm).length <= 3) {
+      // `{ form: { name } }` only — keep looking at the parent.
+    }
+  }
+
+  return stripMetaFields(fieldsFromRecord(obj));
 }
 
 export function stripMetaFields(fields: Record<string, string>): Record<string, string> {
@@ -135,29 +253,128 @@ export function stripTrailingFieldIndex(key: string): string {
   return key.replace(/_\d+$/, "");
 }
 
-function isWebflowWebhook(root: Record<string, unknown>): boolean {
-  const trigger = asString(root.triggerType)?.toLowerCase();
-  if (trigger === "form_submission") return true;
-  const payload = root.payload;
-  return Boolean(
-    payload &&
-      typeof payload === "object" &&
-      !Array.isArray(payload) &&
-      "data" in (payload as object),
+export function formNameFrom(obj: Record<string, unknown>): string | null {
+  const nestedForm = unwrapObject(obj.form);
+  return (
+    asString(obj.name) ??
+    asString(obj.formName) ??
+    asString(obj.form_name) ??
+    asString(obj.displayName) ??
+    (nestedForm ? formNameFrom(nestedForm) : null)
   );
+}
+
+function isWebflowWebhook(
+  root: Record<string, unknown>,
+  payload: Record<string, unknown> | null,
+): boolean {
+  const trigger = (
+    asString(root.triggerType) ??
+    asString(root.trigger_type) ??
+    asString(root.trigger)
+  )?.toLowerCase();
+  if (trigger === "form_submission") return true;
+  return Boolean(payload && hasFieldContainer(payload));
 }
 
 function isWebflowDataApi(root: Record<string, unknown>): boolean {
   return Boolean(root.formResponse && typeof root.formResponse === "object");
 }
 
-function looksLikeWebhookPayload(root: Record<string, unknown>): boolean {
-  return Boolean(
-    root.data &&
-      typeof root.data === "object" &&
-      !Array.isArray(root.data) &&
-      (root.formId != null || root.submittedAt != null || root.siteId != null),
+function looksLikeDesignerFlat(root: Record<string, unknown>): boolean {
+  if (hasFieldContainer(root)) return false;
+  const formName = formNameFrom(root);
+  if (!formName) return false;
+  const keys = Object.keys(root);
+  const hasEnvelope = root.page != null || root.site != null || root.website != null;
+  const hasFormFields = keys.some((key) => isLikelyFormFieldKey(key));
+  return hasEnvelope || hasFormFields;
+}
+
+function isLikelyFormFieldKey(key: string): boolean {
+  const normalized = normalizeLookupKey(key);
+  if (!normalized || META_KEYS.has(normalized) || normalized === "website") return false;
+  return (
+    /email/.test(normalized) ||
+    /first_name/.test(normalized) ||
+    /last_name/.test(normalized) ||
+    /message/.test(normalized) ||
+    /phone|telefoon|tel/.test(normalized)
   );
+}
+
+function stripEnvelopeMeta(fields: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    const normalized = normalizeLookupKey(key);
+    if (
+      normalized === "website" ||
+      normalized === "page" ||
+      normalized === "site" ||
+      normalized === "name"
+    ) {
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+function looksLikeWebhookPayload(root: Record<string, unknown>): boolean {
+  const nested = hasFieldContainer(root);
+  const envelope =
+    root.formId != null ||
+    root.form_id != null ||
+    root.submittedAt != null ||
+    root.submitted_at != null ||
+    root.siteId != null ||
+    root.site_id != null ||
+    root.site != null ||
+    root.page != null ||
+    (typeof root.name === "string" && root.name.trim() !== "");
+  return nested && envelope;
+}
+
+function hasFieldContainer(obj: Record<string, unknown>): boolean {
+  return FIELD_CONTAINER_KEYS.some((key) => isFieldContainer(obj[key]));
+}
+
+function isFieldContainer(value: unknown): boolean {
+  const unwrapped = unwrapJson(value);
+  if (Array.isArray(unwrapped)) return unwrapped.length > 0;
+  return Boolean(unwrapped && typeof unwrapped === "object");
+}
+
+function siteIdFrom(obj: Record<string, unknown>): string | null {
+  const direct = asString(obj.siteId) ?? asString(obj.site_id);
+  if (direct) return direct;
+  const site = unwrapJson(obj.site);
+  if (typeof site === "string" && site.trim()) return site.trim();
+  if (site && typeof site === "object" && !Array.isArray(site)) {
+    const rec = site as Record<string, unknown>;
+    return asString(rec.id) ?? asString(rec.siteId);
+  }
+  return null;
+}
+
+function unwrapObject(value: unknown): Record<string, unknown> | null {
+  const unwrapped = unwrapJson(value);
+  if (!unwrapped || typeof unwrapped !== "object" || Array.isArray(unwrapped)) {
+    return null;
+  }
+  return unwrapped as Record<string, unknown>;
+}
+
+function unwrapJson(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
 }
 
 function asString(value: unknown): string | null {
