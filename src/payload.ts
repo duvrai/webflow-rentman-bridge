@@ -130,6 +130,11 @@ export function normalizeLookupKey(key: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
+/** Webflow Designer often appends an index ("First Name 4" → first_name_4). */
+export function stripTrailingFieldIndex(key: string): string {
+  return key.replace(/_\d+$/, "");
+}
+
 function isWebflowWebhook(root: Record<string, unknown>): boolean {
   const trigger = asString(root.triggerType)?.toLowerCase();
   if (trigger === "form_submission") return true;

@@ -1,5 +1,5 @@
 import { parseCsv, resolveFieldMap } from "./config.ts";
-import { normalizeLookupKey } from "./payload.ts";
+import { normalizeLookupKey, stripTrailingFieldIndex } from "./payload.ts";
 import type {
   Env,
   FieldKey,
@@ -58,6 +58,7 @@ export function mapSubmission(
   );
   const start = toIsoDateTime(picked.usageperiod_start, false);
   const end = toIsoDateTime(picked.usageperiod_end, true);
+  const plan = resolvePlanPeriods(start, end, now);
   const defaultName = (env.DEFAULT_PROJECT_NAME ?? "Website request").trim() ||
     "Website request";
   const name = buildProjectName(picked, submission, defaultName, now);
@@ -67,6 +68,8 @@ export function mapSubmission(
     name,
     language,
     remark: buildRemark(picked, submission),
+    planperiod_start: plan.start,
+    planperiod_end: plan.end,
   };
 
   assignIf(request, "contact_name", picked.contact_name);
@@ -76,14 +79,10 @@ export function mapSubmission(
   assignIf(request, "contact_phone", picked.contact_phone);
   assignIf(request, "location_name", picked.location_name);
 
-  if (start) {
-    request.usageperiod_start = start;
-    request.planperiod_start = start;
-  }
-  if (end) {
-    request.usageperiod_end = end;
-    request.planperiod_end = end;
-  }
+  // Only set usageperiod when the form supplied a date. Contact forms have
+  // none today; later optional date fields can populate usage + plan cleanly.
+  if (start) request.usageperiod_start = start;
+  if (end) request.usageperiod_end = end;
 
   return { ignored: false, request };
 }
@@ -101,11 +100,24 @@ export function pickFields(
 
 export function buildLookup(fields: Record<string, string>): Map<string, string> {
   const lookup = new Map<string, string>();
+  const indexed: Array<[string, string]> = [];
+
   for (const [key, value] of Object.entries(fields)) {
     const normalized = normalizeLookupKey(key);
     if (!normalized) continue;
     if (!lookup.has(normalized)) lookup.set(normalized, value);
+
+    const base = stripTrailingFieldIndex(normalized);
+    if (base && base !== normalized) {
+      indexed.push([base, value]);
+    }
   }
+
+  // Exact names win; Webflow "Label N" aliases fill in only if unused.
+  for (const [base, value] of indexed) {
+    if (!lookup.has(base)) lookup.set(base, value);
+  }
+
   return lookup;
 }
 
@@ -130,7 +142,7 @@ export function toIsoDateTime(value: string, endOfDay: boolean): string | undefi
   if (!trimmed) return undefined;
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    return endOfDay ? `${trimmed}T23:59:59Z` : `${trimmed}T00:00:00Z`;
+    return endOfDay ? endOfUtcDay(trimmed) : startOfUtcDay(trimmed);
   }
 
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(trimmed)) {
@@ -144,6 +156,45 @@ export function toIsoDateTime(value: string, endOfDay: boolean): string | undefi
   const parsed = Date.parse(trimmed);
   if (Number.isNaN(parsed)) return undefined;
   return new Date(parsed).toISOString();
+}
+
+/**
+ * Rentman requires planperiod_start and planperiod_end.
+ * Usage dates stay unset unless the form supplied them.
+ *
+ * Defaults (no form dates): today UTC, 00:00:00Z–23:59:59Z — a same-day
+ * planning window so contact forms succeed. Staff replace it when converting
+ * the request. One date: the missing plan bound is the same UTC calendar day.
+ */
+export function resolvePlanPeriods(
+  start: string | undefined,
+  end: string | undefined,
+  now: () => number,
+): { start: string; end: string } {
+  if (start && end) return { start, end };
+
+  if (start) {
+    return { start, end: endOfUtcDay(utcDatePart(start)) };
+  }
+
+  if (end) {
+    return { start: startOfUtcDay(utcDatePart(end)), end };
+  }
+
+  const day = new Date(now()).toISOString().slice(0, 10);
+  return { start: startOfUtcDay(day), end: endOfUtcDay(day) };
+}
+
+function utcDatePart(iso: string): string {
+  return iso.slice(0, 10);
+}
+
+function startOfUtcDay(day: string): string {
+  return `${day}T00:00:00Z`;
+}
+
+function endOfUtcDay(day: string): string {
+  return `${day}T23:59:59Z`;
 }
 
 export function buildProjectName(

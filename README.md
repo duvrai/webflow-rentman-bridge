@@ -39,7 +39,7 @@ Webflow form
 
 Rentman create fields used (from the official `projectrequests` resource):
 
-`name`, `contact_name`, `contact_person_first_name`, `contact_person_lastname`, `contact_person_email`, `contact_phone`, `location_name`, `usageperiod_start`, `usageperiod_end`, `planperiod_start`, `planperiod_end` (copied from usage dates when present), `language`, `remark`, `linked_contact` (always `null`).
+`name`, `contact_name`, `contact_person_first_name`, `contact_person_lastname`, `contact_person_email`, `contact_phone`, `location_name`, `usageperiod_start`, `usageperiod_end` (only when the form supplies dates), `planperiod_start`, `planperiod_end` (always sent — see Field mapping), `language`, `remark`, `linked_contact` (always `null`).
 
 Other Rentman fields (`price`, mailing address, `is_paid`, …) are left unset.
 
@@ -110,7 +110,7 @@ project=Gala&email=ada%40example.com&website=
 
 ## Field mapping
 
-Aliases are case-insensitive. Spaces, hyphens, and accents collapse (`Prénom` → `prenom`, `E-mail` → `e_mail`).
+Aliases are case-insensitive. Spaces, hyphens, and accents collapse (`Prénom` → `prenom`, `E-mail` → `e_mail`). A trailing Designer index is ignored (`First Name 4` matches `first_name`, `Email 6` matches `email`, `Message 7` matches `message`). An unnumbered field of the same name wins if both exist.
 
 | Rentman / remark slot | Default Webflow names (first match wins) |
 | --- | --- |
@@ -121,13 +121,16 @@ Aliases are case-insensitive. Spaces, hyphens, and accents collapse (`Prénom` �
 | `contact_phone` | `phone`, `telefoon`, `tel`, `gsm`, … |
 | `contact_person_email` | `email`, `e-mail`, … |
 | `location_name` | `location`, `locatie`, `lieu`, … |
-| `usageperiod_start` / `_end` | `start` / `end`, `startdatum` / `einddatum`, `from` / `to`, … Date-only values become `T00:00:00Z` / `T23:59:59Z`. |
+| `usageperiod_start` / `_end` | `start` / `end`, `startdatum` / `einddatum`, `from` / `to`, … Date-only values become `T00:00:00Z` / `T23:59:59Z`. Omitted when the form has no dates. |
+| `planperiod_start` / `_end` | Always sent (Rentman requires both). Copied from usage dates when present. If only one date is present, the other plan bound is that same UTC calendar day. If the form has no dates, today UTC `00:00:00Z`–`23:59:59Z`. |
 | `language` | `language`, `taal`, `langue` → `nl`, `fr`, or `en` |
 | remark **Brief** | `message`, `brief`, `opmerkingen`, … |
 | remark **Type** | `type`, `soort`, `event_type` |
 | remark **Materiaal/crew** | `materiaal`, `crew`, `equipment` |
 
 If `name` is empty, the title becomes `{company or person} — {form name}` or `Website request — YYYY-MM-DD`.
+
+`planperiod_*` is the office planning window Rentman requires on create. Contact / offerte forms often have no event dates; the Worker still succeeds by sending today UTC and leaving `usageperiod_*` unset so later optional date fields can map to usage + plan without colliding with a fabricated event.
 
 Override defaults in one of these ways (later entries replace that slot’s aliases):
 

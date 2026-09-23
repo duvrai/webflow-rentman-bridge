@@ -4,6 +4,7 @@ import {
   normalizeLookupKey,
   normalizeSubmission,
   parseUrlEncoded,
+  stripTrailingFieldIndex,
 } from "../src/payload.ts";
 
 const webhook = {
@@ -87,6 +88,10 @@ describe("helpers", () => {
     expect(normalizeLookupKey("Prénom")).toBe("prenom");
     expect(normalizeLookupKey("First Name")).toBe("first_name");
     expect(normalizeLookupKey("e-mail")).toBe("e_mail");
+    expect(normalizeLookupKey("First Name 4")).toBe("first_name_4");
+    expect(stripTrailingFieldIndex("first_name_4")).toBe("first_name");
+    expect(stripTrailingFieldIndex("email_6")).toBe("email");
+    expect(stripTrailingFieldIndex("message_7")).toBe("message");
   });
 
   it("stringifies nested field values", () => {
