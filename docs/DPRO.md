@@ -13,7 +13,7 @@ The worker does not write project equipment, does not send customer email, and d
 
 ## Suggested Webflow field names
 
-Use stable field names in the Designer (not only labels). These match the worker defaults:
+Use stable field names in the Designer (not only labels). These match the worker defaults. Numbered Designer labels also match (`First Name 4` → first name, `Last Name 4` → last name, `Email 6` → email, `Message 7` → brief) — no `FIELD_*` override is required for that pattern.
 
 | Form field name | Rentman / remark slot |
 | --- | --- |
@@ -55,6 +55,8 @@ If the live field names differ, set `FIELD_*` or `FIELD_MAP_JSON` on the Worker 
 - Token: Rentman → Configuration / Settings → API (Bearer). The token never belongs in Webflow, the browser, or this repo.
 - After go-live, convert a test request in the Rentman UI and confirm contact matching.
 - Equipment lists from the form land in **remark** only. Staff still plan gear in Rentman.
+
+The live contact form currently has no date fields. The Worker still creates the request: `planperiod_start` / `planperiod_end` default to today UTC; `usageperiod_*` stays unset. When optional start/end fields are added later, they map to usage + plan.
 
 ## Later
 
