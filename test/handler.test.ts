@@ -127,6 +127,10 @@ describe("handleRequest", () => {
     const sent = JSON.parse(String(init.body));
     expect(sent.linked_contact).toBeNull();
     expect(sent.contact_person_email).toBe("ops@acme.test");
+    expect(sent.planperiod_start).toBe("2026-09-22T00:00:00Z");
+    expect(sent.planperiod_end).toBe("2026-09-22T23:59:59Z");
+    expect(sent).not.toHaveProperty("usageperiod_start");
+    expect(sent).not.toHaveProperty("usageperiod_end");
     expect(sent).not.toHaveProperty("projectequipment");
   });
 
